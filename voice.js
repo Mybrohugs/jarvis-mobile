@@ -16,6 +16,8 @@ const INLINE = 'Say in a calm, warm, low British butler voice, in Russian: ';
 let ctx = null;
 export function unlock() {  // call inside a tap: iOS allows sound only after a gesture
   const AC = window.AudioContext || window.webkitAudioContext;
+  // iPhone: without this, Web Audio is muted by the ring/silent switch (Siri's voice is not)
+  try { if (navigator.audioSession) { navigator.audioSession.type = 'playback'; } } catch (e) { /* older iOS */ }
   if (!AC) { return; }
   if (!ctx) { ctx = new AC(); }
   ctx.resume();
@@ -91,7 +93,9 @@ export async function transcribe(blob) {
 function rest() { try { return JSON.parse(localStorage.getItem('jarvis.mobile.ttsRest') || '{}'); } catch (e) { return {}; } }
 function setRest(m) { const r = rest(); r[m] = Date.now() + 30 * 60000; try { localStorage.setItem('jarvis.mobile.ttsRest', JSON.stringify(r)); } catch (e) { /* ignore */ } }
 
-async function geminiSpeech(text) {
+export let lastError = '';  // why the phone fell back to its own voice (shown once on screen)
+export function clearError() { lastError = ''; }
+export async function geminiSpeech(text) {
   const key = store.get('geminiKey');
   if (!key) { throw new Error('no gemini key'); }
   let last = null;
@@ -246,6 +250,7 @@ export async function speak(text, onLevel = () => {}) {
       const { samples, rate } = await geminiSpeech(part);
       await play(robot3(samples, rate), rate, onLevel);
     } catch (e) {
+      lastError = e.message || String(e);
       await phoneVoice(part);
     }
   }

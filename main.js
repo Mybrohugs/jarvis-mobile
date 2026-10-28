@@ -12,6 +12,9 @@ const orb = window.JarvisOrb;
 const STATES = { standby: 'нажмите и говорите', listening: 'слушаю', thinking: 'думаю', speaking: 'говорю', error: 'сбой' };
 function setState(name) { $('state').textContent = STATES[name]; orb.setState(name); }
 function show(text) { $('reply').textContent = text; }
+function voiceNote() {  // say on screen why the phone's own voice was used instead of JARVIS's
+  if (voice.lastError) { show(($('reply').textContent + ' [голос Gemini: ' + voice.lastError + ']').trim()); voice.clearError(); }
+}
 
 // ---------- one exchange: text in, spoken answer out ----------
 let busy = false;
@@ -31,6 +34,7 @@ async function handle(text) {
     for (const x of brain.takeExtras()) { if (x.kind === 'file') { fileButton(x.link); } }
     setState('speaking');
     await voice.speak(answer, (l) => orb.setLevel(l));
+    voiceNote();
     setState('standby');
   } catch (e) {
     show('Сбой: ' + e.message);
@@ -204,7 +208,7 @@ $('pcpair').onclick = async () => {
   try { await pc.pair($('pcurl').value, $('pccode').value); $('pccode').value = ''; $('pcmsg').textContent = 'Компьютер подключён.'; status(); }
   catch (e) { $('pcmsg').textContent = 'Не получилось: ' + e.message; }
 };
-$('soundtest').onclick = () => { voice.unlock(); settings(false); setState('speaking'); voice.speak('Звук работает. На связи JARVIS.', (l) => orb.setLevel(l)).then(() => setState('standby')); };
+$('soundtest').onclick = () => { voice.unlock(); settings(false); setState('speaking'); show(''); voice.speak('Звук работает. На связи JARVIS.', (l) => orb.setLevel(l)).then(() => { voiceNote(); setState('standby'); }); };
 $('briefing').onclick = () => { voice.unlock(); settings(false); handle('брифинг'); };
 $('forget').onclick = () => {
   if (!confirm('Стереть с этого телефона все ключи и настройки JARVIS?')) { return; }

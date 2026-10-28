@@ -190,13 +190,13 @@ $('settings').onclick = (e) => { if (e.target === $('settings')) { settings(fals
 $('save').onclick = async () => {
   for (const [id, key] of Object.entries(FORM)) { if (id !== 'pcurl' || $(id).value.trim()) { store.set(key, $(id).value.trim()); } }
   store.set('speak', $('speak').checked ? '1' : '0');
-  try { await google.prepare(); } catch (e) { /* shown on sign-in */ }
   settings(false);
   status();
 };
 $('glogin').onclick = async () => {
   store.set('googleClientId', $('gclient').value.trim());
-  try { await google.prepare(); await google.signIn(); $('gstate').textContent = 'Вход выполнен.'; }
+  $('gstate').textContent = 'Открываю Google…';
+  try { await google.signIn(); }
   catch (e) { $('gstate').textContent = 'Не получилось: ' + e.message; }
 };
 $('pcpair').onclick = async () => {
@@ -208,7 +208,7 @@ $('soundtest').onclick = () => { voice.unlock(); settings(false); setState('spea
 $('briefing').onclick = () => { voice.unlock(); settings(false); handle('брифинг'); };
 $('forget').onclick = () => {
   if (!confirm('Стереть с этого телефона все ключи и настройки JARVIS?')) { return; }
-  store.wipe(); try { sessionStorage.clear(); } catch (e) { /* ignore */ }
+  store.wipe(); google.signOut(); try { sessionStorage.clear(); } catch (e) { /* ignore */ }
   brain.reset(); fillSettings(); status();
 };
 let wakeLock = null;
@@ -233,6 +233,9 @@ clock(); setInterval(clock, 15000);
 setInterval(status, 60000);
 orb.mount($('orb'));
 status();
-google.prepare().catch(() => {});
-if (!store.get('claudeKey')) { show('Добро пожаловать, сэр. Откройте настройки (шестерёнка) и введите ключ Claude.'); }
+if (google.lastError) { show('Вход в Google не выполнен: ' + google.lastError + '.'); }
+else if (location.hash === '' && google.signedIn() && sessionStorage.getItem('jarvis.gshown') !== '1') {
+  try { sessionStorage.setItem('jarvis.gshown', '1'); } catch (e) { /* ignore */ }
+  show('Вход в Google выполнен, сэр. Календарь подключён.');
+} else if (!store.get('claudeKey')) { show('Добро пожаловать, сэр. Откройте настройки (шестерёнка) и введите ключ Claude.'); }
 if ('serviceWorker' in navigator) { navigator.serviceWorker.register('sw.js').catch(() => {}); }

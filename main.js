@@ -40,7 +40,17 @@ async function run(text) {
   if (!askedAt) { askedAt = performance.now(); }
   try {
     const briefing = /^(брифинг|доброе утро|что у меня сегодня)\b/i.test(text);
-    const answer = await brain.ask(briefing ? 'Сделай утренний брифинг: погода сегодня, мои встречи сегодня и завтра утром. ' + text : text);
+    let answer;
+    try {
+      answer = await brain.ask(briefing ? 'Сделай утренний брифинг: погода сегодня, мои встречи сегодня и завтра утром. ' + text : text);
+    } catch (e) {
+      // The phone's network may not reach api.anthropic.com ("Connection error"); the paired PC can: ask it.
+      if (!pc.knownAlive() || !/connection|load failed|network|fetch/i.test(e.message || '')) { throw e; }
+      pc.report('answer via PC (phone Claude: ' + e.message + ')');
+      $('state').textContent = 'спрашиваю ПК';
+      const r = await pc.say(text);
+      answer = r.speech || 'Компьютер не ответил.';
+    }
     show(answer);
     for (const x of brain.takeExtras()) { if (x.kind === 'file') { fileButton(x.link); } }
     setState('speaking');

@@ -58,7 +58,7 @@ async function jsonPost(path, body, timeoutMs) {
 }
 
 // The PC understands its own allowlisted phrases ("найди на компьютере …", "отправь файл 2").
-export const say = (text) => jsonPost('/api/say', { text }, 30000);
+export const say = (text) => jsonPost('/api/say', { text }, 70000);  // the PC itself waits up to 60 s for an answer
 export const find = (query) => say('найди на компьютере ' + query);
 export const send = (index) => say('отправь файл ' + index);
 

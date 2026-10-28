@@ -242,26 +242,35 @@ function levels(samples, rate) {  // loudness 30 times a second, for the orb
 function playElement(samples, rate, onLevel) {
   return new Promise((ok, fail) => {
     const url = URL.createObjectURL(wav(samples, rate)), env = levels(samples, rate);
-    let on = true;
+    let on = true, guard = 0;
     const finish = (err) => {
       if (!on) { return; }
-      on = false; current = null; onLevel(0);
+      on = false; current = null; onLevel(0); clearTimeout(guard);
       player.onended = player.onerror = null;
       URL.revokeObjectURL(url);
-      if (err) { fail(err); } else { ok(); }
+      if (err) { player.pause(); fail(err); } else { ok(); }
     };
     const follow = () => { if (!on) { return; } onLevel(env[Math.floor(player.currentTime * 30)] || 0); requestAnimationFrame(follow); };
     player.onended = () => finish();
     player.onerror = () => finish(new Error('плеер не смог воспроизвести'));
     current = { stop: () => { player.pause(); finish(); } };
+    // never wait forever: iOS sometimes neither starts nor reports the end
+    guard = setTimeout(() => finish(new Error('плеер не запустился')), 3000);
     player.src = url;
-    player.play().then(follow, finish);
+    player.play().then(() => {
+      clearTimeout(guard);
+      guard = setTimeout(() => finish(), samples.length / rate * 1000 + 3000);
+      follow();
+    }, (e) => finish(e || new Error('плеер отказал')));
   });
 }
 
 async function playContext(samples, rate, onLevel) {  // Web Audio, if the player is refused
   if (!ctx) { throw new Error('звук не разблокирован: нажмите на шар'); }
-  if (ctx.state !== 'running') { await ctx.resume(); }
+  if (ctx.state !== 'running') {  // iOS may never resume outside a tap: give up after 1.5 s
+    await Promise.race([ctx.resume().catch(() => {}), new Promise((ok) => setTimeout(ok, 1500))]);
+    if (ctx.state !== 'running') { throw new Error('звук на паузе у iPhone (' + ctx.state + ')'); }
+  }
   return new Promise((ok) => {
     const buf = ctx.createBuffer(1, samples.length, rate);
     buf.copyToChannel(samples, 0);
@@ -283,10 +292,12 @@ async function play(samples, rate, onLevel) {
   return playContext(samples, rate, onLevel);
 }
 
+let wake = () => {}, stopSignal = new Promise(() => {});
 export function stop() {  // stops this phrase and the ones still queued
   stopped = true;
   if (current) { current.stop(); }
   if ('speechSynthesis' in window) { speechSynthesis.cancel(); }
+  wake();
 }
 
 function chunks(text) {  // a short first phrase so the voice starts sooner, then up to ~380 characters
@@ -309,7 +320,11 @@ function phoneVoice(text) {
     u.lang = 'ru-RU';
     if (male || ru[0]) { u.voice = male || ru[0]; }
     u.pitch = male ? 0.9 : 0.6;
-    u.onend = u.onerror = () => ok();
+    // iOS does not always report the end (after cancel especially): stop() and a timer also finish it
+    const t = setTimeout(() => done(), 4000 + text.length * 90);
+    const done = () => { clearTimeout(t); current = null; ok(); };
+    u.onend = u.onerror = done;
+    current = { stop: done };
     speechSynthesis.speak(u);
   });
 }
@@ -326,12 +341,13 @@ export async function speak(text, onLevel = () => {}) {
   if (store.get('speak') !== '1' || !text) { return; }
   if (!rec) { session('playback'); }
   stopped = false;
+  stopSignal = new Promise((ok) => { wake = () => ok({ error: new Error('остановлено') }); });
   const usePc = await pc.reachable();
   const parts = chunks(text);
   const make = (part) => synth(part, usePc).catch((error) => ({ error }));
   let next = make(parts[0]);
   for (let i = 0; i < parts.length && !stopped; i++) {
-    const got = await next;
+    const got = await Promise.race([next, stopSignal]);  // a stop does not wait for the voice service
     next = i + 1 < parts.length ? make(parts[i + 1]) : null;  // the next phrase is prepared while this one plays
     if (stopped) { return; }
     try {

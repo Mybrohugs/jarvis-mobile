@@ -1,7 +1,7 @@
 'use strict';
 // Caches only this app's own files, so it opens offline. Requests to Claude, Gemini, Google and the PC
 // are never cached.
-const CACHE = 'jarvis-mobile-v6';
+const CACHE = 'jarvis-mobile-v7';
 const SHELL = ['./', 'index.html', 'app.css', 'mobile.css', 'orb.js', 'main.js', 'brain.js', 'voice.js', 'google.js', 'pc.js',
   'store.js', 'manifest.webmanifest', 'icon-180.png', 'icon-512.png', 'fonts/exo2-cyrillic.woff2', 'fonts/exo2-latin.woff2'];
 

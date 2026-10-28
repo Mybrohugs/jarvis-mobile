@@ -10,18 +10,25 @@ const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls)
 const orb = window.JarvisOrb;
 
 const STATES = { standby: 'нажмите и говорите', listening: 'слушаю', thinking: 'думаю', speaking: 'говорю', error: 'сбой' };
-function setState(name) { $('state').textContent = STATES[name]; orb.setState(name); }
+let phase = 'standby';
+function setState(name) { phase = name; $('state').textContent = STATES[name]; orb.setState(name); }
 function show(text) { $('reply').textContent = text; }
 function voiceNote() {  // say on screen why the phone's own voice was used instead of JARVIS's
-  if (voice.lastError) { show(($('reply').textContent + ' [голос Gemini: ' + voice.lastError + ']').trim()); voice.clearError(); }
+  if (voice.lastError) { show(($('reply').textContent + ' [звук: ' + voice.lastError + ']').trim()); voice.clearError(); }
 }
 
 // ---------- one exchange: text in, spoken answer out ----------
-let busy = false;
-async function handle(text) {
+let busy = false, exchange = null;
+function handle(text) {
   text = text.trim();
-  if (!text || busy) { return; }
+  if (!text || busy) { return Promise.resolve(); }
   busy = true;
+  exchange = run(text);
+  return exchange;
+}
+// after an interruption: wait for the stopped answer to wind down, but never for long
+const answered = () => Promise.race([exchange || Promise.resolve(), new Promise((ok) => setTimeout(ok, 1500))]);
+async function run(text) {
   $('extra').replaceChildren();
   setState('thinking');
   show('');
@@ -53,7 +60,8 @@ async function talkDown(e) {
   e.preventDefault();
   voice.unlock();  // inside the gesture (iOS)
   if (recording) { voice.stopRecording(); return; }
-  if (busy) { voice.stop(); return; }  // a tap while JARVIS talks: stop talking
+  if (busy && phase !== 'speaking') { return; }  // still thinking: the answer is on its way
+  if (busy) { voice.stop(); await answered(); busy = false; }  // a tap while JARVIS talks: stop and listen at once
   try {
     $('extra').replaceChildren(); show('');
     recording = voice.startRecording((l) => { orb.setLevel(l); $('lvl').textContent = String(Math.round(l * 99)).padStart(2, '0'); });

@@ -19,3 +19,7 @@ export function wipe() {
 export function json(name, fallback) {
   try { return JSON.parse(get(name)) ?? fallback; } catch (e) { return fallback; }
 }
+// A cloud service this phone's network cannot reach (no connection, "not available in your location"):
+// skipped for a while so every question does not first wait for the same refusal.
+export function off(name) { return Number(get('off.' + name) || 0) > Date.now(); }
+export function setOff(name, ms = 3600000) { set('off.' + name, Date.now() + ms); }

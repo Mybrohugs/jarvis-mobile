@@ -83,6 +83,7 @@ export async function transcribe(blob) {
   }
   const key = store.get('geminiKey');
   if (!key) { throw new Error('для голоса без компьютера нужен ключ Gemini (Настройки)'); }
+  if (store.off('gemini')) { throw new Error('Gemini недоступен из этой сети, а компьютер не ответил'); }
   const data = b64(await blob.arrayBuffer());
   let last = null;
   for (const model of STT) {
@@ -96,6 +97,7 @@ export async function transcribe(blob) {
     const d = await r.json().catch(() => ({}));
     if (r.ok) { return ((((d.candidates || [])[0] || {}).content || {}).parts || []).map((p) => p.text || '').join('').trim(); }
     last = new Error((d.error && d.error.message) || 'Gemini HTTP ' + r.status);
+    if (geoRefused(last)) { break; }
     if (r.status !== 429 && r.status !== 503) { break; }
   }
   throw last || new Error('распознавание Gemini недоступно');
@@ -105,11 +107,16 @@ export async function transcribe(blob) {
 function rest() { try { return JSON.parse(localStorage.getItem('jarvis.mobile.ttsRest') || '{}'); } catch (e) { return {}; } }
 function setRest(m) { const r = rest(); r[m] = Date.now() + 30 * 60000; try { localStorage.setItem('jarvis.mobile.ttsRest', JSON.stringify(r)); } catch (e) { /* ignore */ } }
 
+// Gemini refuses this network outright ("not available in your current location"): no model will answer,
+// so Gemini is skipped for an hour and the PC does the voice.
+function geoRefused(e) { if (/location|region/i.test(e.message)) { store.setOff('gemini'); return true; } return false; }
+
 export let lastError = '';  // why the phone fell back to its own voice (shown once on screen)
 export function clearError() { lastError = ''; }
 export async function geminiSpeech(text) {
   const key = store.get('geminiKey');
   if (!key) { throw new Error('no gemini key'); }
+  if (store.off('gemini')) { throw new Error('Gemini недоступен из этой сети'); }
   let last = null;
   for (const [model, meta] of TTS) {
     if ((rest()[model] || 0) > Date.now()) { continue; }
@@ -129,6 +136,7 @@ export async function geminiSpeech(text) {
     }
     last = new Error((d.error && d.error.message) || 'Gemini HTTP ' + r.status);
     if (r.status === 429) { setRest(model); }
+    if (geoRefused(last)) { break; }
   }
   throw last || new Error('голос Gemini на отдыхе: дневной лимит исчерпан');
 }
@@ -364,6 +372,7 @@ async function geminiStream(text, onPcm, signal) {  // resolves when the stream 
         const d = await r.json().catch(() => ({}));
         last = new Error((d.error && d.error.message) || 'Gemini HTTP ' + r.status);
         if (r.status === 429) { setRest(model); }
+        if (geoRefused(last)) { break; }
         continue;
       }
       const reader = r.body.getReader(), dec = new TextDecoder();
@@ -497,6 +506,7 @@ export async function speak(text, onLevel = () => {}, onStart = () => {}) {
   let failed = -1;
   const feeding = (async () => {  // Gemini fills the line while it plays
     try {
+      if (store.off('gemini')) { failed = 0; return; }  // refused from this network: the PC voice below
       for (let i = 0; i < parts.length && !abort.signal.aborted; i++) {
         try { await geminiStream(parts[i], (pcm) => line.push(pcm), abort.signal); }
         catch (e) {

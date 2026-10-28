@@ -535,6 +535,7 @@ export async function speak(text, onLevel = () => {}, onStart = () => {}) {
       begin();
       await play(loud(w.samples, w.rate), w.rate, onLevel);
       left = '';
+      lastError = '';  // JARVIS's voice was heard (the PC's): nothing to report
     } catch (e) { lastError = (e && e.message) || String(e); }
   }
   if (stopped) { return; }

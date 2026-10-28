@@ -14,7 +14,11 @@ let phase = 'standby';
 function setState(name) { phase = name; $('state').textContent = STATES[name]; orb.setState(name); }
 function show(text) { $('reply').textContent = text; }
 function voiceNote() {  // say on screen why the phone's own voice was used instead of JARVIS's
-  if (voice.lastError) { show(($('reply').textContent + ' [звук: ' + voice.lastError + ']').trim()); voice.clearError(); }
+  if (voice.lastError) {
+    show(($('reply').textContent + ' [звук: ' + voice.lastError + ']').trim());
+    pc.report('voice: ' + voice.lastError);
+    voice.clearError();
+  }
 }
 
 // ---------- one exchange: text in, spoken answer out ----------
@@ -45,6 +49,7 @@ async function run(text) {
     setState('standby');
   } catch (e) {
     show('Сбой: ' + e.message);
+    pc.report('answer: ' + e.message);
     setState('error');
   } finally {
     busy = false;
@@ -77,6 +82,7 @@ async function talkDown(e) {
   } catch (err) {
     recording = null; $('mic').classList.remove('on');
     show(err.name === 'NotAllowedError' ? 'Нет доступа к микрофону: разрешите его в настройках телефона.' : 'Сбой: ' + err.message);
+    pc.report(($('state').textContent === 'распознаю' ? 'transcribe: ' : 'mic: ') + err.message);
     setState('error');
   }
 }

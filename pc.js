@@ -90,6 +90,14 @@ export async function speech(text) {
   return new Uint8Array(await r.arrayBuffer());
 }
 
+// A short error label for the PC log (%LOCALAPPDATA%\JARVIS\gateway.log), so failures on the phone can be
+// diagnosed. Fire-and-forget; nothing when the PC is not paired.
+export function report(event) {
+  if (!configured()) { return; }
+  call('/api/clientlog', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ event: ('mobile ' + event).slice(0, 120) }) }, 5000).catch(() => {});
+}
+
 export async function listen(blob) {
   const r = await call('/api/listen', { method: 'POST', body: blob, headers: { 'Content-Type': blob.type || 'audio/mp4' } }, 60000);
   const data = await r.json();

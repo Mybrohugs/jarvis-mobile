@@ -1,0 +1,88 @@
+// Optional link to the home PC (JARVIS phone gateway over Tailscale). Used for files both ways and,
+// when it answers, for transcription and the JARVIS voice. Everything else works without it.
+import * as store from './store.js';
+
+const base = () => store.get('pcUrl').replace(/\/+$/, '');
+export const configured = () => /^https:\/\/[a-z0-9.-]+$/i.test(base()) && !!store.get('pcToken');
+
+async function call(path, opts = {}, timeoutMs = 20000) {
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), timeoutMs);
+  try {
+    const r = await fetch(base() + path, {
+      ...opts, cache: 'no-store', signal: ctl.signal,
+      headers: { Authorization: 'Bearer ' + store.get('pcToken'), ...(opts.headers || {}) },
+    });
+    if (r.status === 401) { throw new Error('компьютер не узнал телефон: подключите заново'); }
+    return r;
+  } finally { clearTimeout(timer); }
+}
+
+let alive = false, checkedAt = 0;
+export async function reachable(force = false) {
+  if (!configured()) { return false; }
+  if (!force && Date.now() - checkedAt < 30000) { return alive; }
+  checkedAt = Date.now();
+  try { alive = (await call('/api/summary', {}, 4000)).ok; } catch (e) { alive = false; }
+  return alive;
+}
+
+export async function pair(url, code) {
+  const clean = url.trim().replace(/\/+$/, '');
+  if (!/^https:\/\/[a-z0-9.-]+$/i.test(clean)) { throw new Error('адрес вида https://имя-пк.сеть.ts.net'); }
+  if (!/^\d{6}$/.test(code.trim())) { throw new Error('нужен 6-значный код с компьютера'); }
+  const r = await fetch(clean + '/api/pair', {
+    method: 'POST', cache: 'no-store', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ code: code.trim(), name: 'JARVIS Mobile' }),
+  });
+  const data = await r.json();
+  if (!r.ok) { throw new Error(data.error || 'HTTP ' + r.status); }
+  store.set('pcUrl', clean);
+  store.set('pcToken', data.token);
+  checkedAt = 0;
+  return true;
+}
+
+async function jsonPost(path, body, timeoutMs) {
+  const r = await call(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }, timeoutMs);
+  const data = await r.json();
+  if (!r.ok) { throw new Error(data.error || 'HTTP ' + r.status); }
+  return data;
+}
+
+// The PC understands its own allowlisted phrases ("найди на компьютере …", "отправь файл 2").
+export const say = (text) => jsonPost('/api/say', { text }, 30000);
+export const find = (query) => say('найди на компьютере ' + query);
+export const send = (index) => say('отправь файл ' + index);
+
+export async function download(link) {
+  if (!/^\/api\/file\/[A-Za-z0-9_-]{20,40}$/.test(link)) { throw new Error('bad link'); }
+  const r = await call(link, {}, 120000);
+  if (!r.ok) { throw new Error(r.status === 410 ? 'ссылка уже использована или истекла' : 'HTTP ' + r.status); }
+  const cd = r.headers.get('Content-Disposition') || '';
+  const name = decodeURIComponent((cd.match(/filename\*=UTF-8''(.+)$/) || [])[1] || 'file');
+  return { name, blob: await r.blob() };
+}
+
+export async function upload(file) {
+  const r = await call('/api/upload', {
+    method: 'POST', body: file,
+    headers: { 'Content-Type': 'application/octet-stream', 'X-Filename': encodeURIComponent(file.name) },
+  }, 300000);
+  const data = await r.json();
+  if (!r.ok) { throw new Error(data.error || 'HTTP ' + r.status); }
+  return data;
+}
+
+export async function listen(blob) {
+  const r = await call('/api/listen', { method: 'POST', body: blob, headers: { 'Content-Type': blob.type || 'audio/mp4' } }, 60000);
+  const data = await r.json();
+  if (!r.ok) { throw new Error(data.error || 'HTTP ' + r.status); }
+  return data.text || '';
+}
+
+export async function speech(text) {
+  const r = await call('/api/speech', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) }, 60000);
+  if (!r.ok) { throw new Error('voice ' + r.status); }
+  return r.arrayBuffer();
+}

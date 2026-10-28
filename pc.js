@@ -1,5 +1,5 @@
 // Optional link to the home PC (JARVIS phone gateway over Tailscale). Used for files both ways and,
-// when it answers, for transcription and the JARVIS voice. Everything else works without it.
+// when it is known to be on, for transcription. Everything else works without it.
 import * as store from './store.js';
 
 const base = () => store.get('pcUrl').replace(/\/+$/, '');
@@ -24,6 +24,13 @@ export async function reachable(force = false) {
   if (!force && Date.now() - checkedAt < 30000) { return alive; }
   checkedAt = Date.now();
   try { alive = (await call('/api/summary', {}, 4000)).ok; } catch (e) { alive = false; }
+  return alive;
+}
+// Without waiting: what is known now (a fresh check runs in the background). For the voice path,
+// where an offline PC must not add its 4 s timeout to every question.
+export function knownAlive() {
+  if (!configured()) { return false; }
+  if (Date.now() - checkedAt >= 30000) { reachable().catch(() => {}); }
   return alive;
 }
 
@@ -79,10 +86,4 @@ export async function listen(blob) {
   const data = await r.json();
   if (!r.ok) { throw new Error(data.error || 'HTTP ' + r.status); }
   return data.text || '';
-}
-
-export async function speech(text) {
-  const r = await call('/api/speech', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) }, 60000);
-  if (!r.ok) { throw new Error('voice ' + r.status); }
-  return r.arrayBuffer();
 }

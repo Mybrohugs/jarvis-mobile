@@ -19,6 +19,7 @@ function voiceNote() {  // say on screen why the phone's own voice was used inst
 
 // ---------- one exchange: text in, spoken answer out ----------
 let busy = false, exchange = null;
+let askedAt = 0;  // when the question was finished (finger lifted / sent): the HUD shows the wait until JARVIS's first sound
 function handle(text) {
   text = text.trim();
   if (!text || busy) { return Promise.resolve(); }
@@ -32,15 +33,14 @@ async function run(text) {
   $('extra').replaceChildren();
   setState('thinking');
   show('');
-  const t0 = performance.now();
+  if (!askedAt) { askedAt = performance.now(); }
   try {
     const briefing = /^(брифинг|доброе утро|что у меня сегодня)\b/i.test(text);
     const answer = await brain.ask(briefing ? 'Сделай утренний брифинг: погода сегодня, мои встречи сегодня и завтра утром. ' + text : text);
-    $('lat').textContent = String(Math.round(performance.now() - t0));
     show(answer);
     for (const x of brain.takeExtras()) { if (x.kind === 'file') { fileButton(x.link); } }
     setState('speaking');
-    await voice.speak(answer, (l) => orb.setLevel(l));
+    await voice.speak(answer, (l) => orb.setLevel(l), () => { $('lat').textContent = String(Math.round(performance.now() - askedAt)); });
     voiceNote();
     setState('standby');
   } catch (e) {
@@ -48,18 +48,19 @@ async function run(text) {
     setState('error');
   } finally {
     busy = false;
+    askedAt = 0;
     orb.setLevel(0);
   }
 }
 
-$('ask').onsubmit = (e) => { e.preventDefault(); voice.unlock(); const t = $('say').value; $('say').value = ''; handle(t); };
+$('ask').onsubmit = (e) => { e.preventDefault(); voice.unlock(); askedAt = performance.now(); const t = $('say').value; $('say').value = ''; handle(t); };
 
 // ---------- push-to-talk: hold the orb or the mic; a short tap starts, the next tap sends ----------
 let recording = null;
 async function talkDown(e) {
   e.preventDefault();
   voice.unlock();  // inside the gesture (iOS)
-  if (recording) { voice.stopRecording(); return; }
+  if (recording) { askedAt = performance.now(); voice.stopRecording(); return; }
   if (busy && phase !== 'speaking') { return; }  // still thinking: the answer is on its way
   if (busy) { voice.stop(); await answered(); busy = false; }  // a tap while JARVIS talks: stop and listen at once
   try {
@@ -79,7 +80,7 @@ async function talkDown(e) {
     setState('error');
   }
 }
-function talkUp() { if (recording && voice.heldFor() > 600) { voice.stopRecording(); } }
+function talkUp() { if (recording && voice.heldFor() > 600) { askedAt = performance.now(); voice.stopRecording(); } }
 for (const id of ['reactor', 'mic']) {
   $(id).addEventListener('pointerdown', talkDown);
   $(id).addEventListener('pointerup', talkUp);

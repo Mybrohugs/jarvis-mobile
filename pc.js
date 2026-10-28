@@ -85,7 +85,7 @@ export async function upload(file) {
 // voice quota is used up, instead of the phone's own quiet voice. Returns WAV bytes.
 export async function speech(text) {
   const r = await call('/api/speech', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text: text.slice(0, 1000) }) }, 60000);
+    body: JSON.stringify({ text: text.slice(0, 1000), local: true }) }, 60000);  // Gemini already refused here
   if (!r.ok) { throw new Error('голос компьютера: HTTP ' + r.status); }
   return new Uint8Array(await r.arrayBuffer());
 }

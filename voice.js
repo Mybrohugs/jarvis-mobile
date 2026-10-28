@@ -13,11 +13,16 @@ const VOICE = 'Schedar';
 const STYLE = 'Спокойный, вежливый и уверенный британский дворецкий-ассистент: ровный бархатный голос, лёгкая ирония, без спешки, чёткая дикция.';
 const INLINE = 'Say in a calm, warm, low British butler voice, in Russian: ';
 
+// iPhone: 'playback' keeps the voice audible with the ring/silent switch on, but it cannot record,
+// so the microphone switches to 'play-and-record' and back. Older iOS has no audioSession: no-op.
+function session(type) {
+  try { if (navigator.audioSession && navigator.audioSession.type !== type) { navigator.audioSession.type = type; } } catch (e) { /* ignore */ }
+}
+
 let ctx = null;
 export function unlock() {  // call inside a tap: iOS allows sound only after a gesture
   const AC = window.AudioContext || window.webkitAudioContext;
-  // iPhone: without this, Web Audio is muted by the ring/silent switch (Siri's voice is not)
-  try { if (navigator.audioSession) { navigator.audioSession.type = 'playback'; } } catch (e) { /* older iOS */ }
+  session('playback');
   if (!AC) { return; }
   if (!ctx) { ctx = new AC(); }
   ctx.resume();
@@ -33,13 +38,14 @@ export const audio = () => ctx;
 let rec = null, stream = null, started = 0;
 export const recording = () => !!rec;
 export async function startRecording(onLevel) {
+  session('play-and-record');
   stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
   const type = ['audio/mp4', 'audio/webm;codecs=opus', 'audio/webm'].find((t) => MediaRecorder.isTypeSupported(t)) || '';
   const chunks = [];
-  rec = new MediaRecorder(stream, type ? { mimeType: type } : undefined);
-  rec.ondataavailable = (e) => { if (e.data.size) { chunks.push(e.data); } };
-  const done = new Promise((ok) => { rec.onstop = () => ok(new Blob(chunks, { type: (rec.mimeType || type || 'audio/mp4').split(';')[0] })); });
-  rec.start();
+  const r = rec = new MediaRecorder(stream, type ? { mimeType: type } : undefined);  // stopRecording() clears rec before onstop
+  r.ondataavailable = (e) => { if (e.data.size) { chunks.push(e.data); } };
+  const done = new Promise((ok) => { r.onstop = () => ok(new Blob(chunks, { type: (r.mimeType || type || 'audio/mp4').split(';')[0] })); });
+  r.start();
   started = Date.now();
   if (ctx && onLevel) {
     const an = ctx.createAnalyser();
@@ -63,6 +69,7 @@ export function stopRecording() {
   if (rec && rec.state !== 'inactive') { rec.stop(); }
   if (stream) { stream.getTracks().forEach((t) => t.stop()); stream = null; }
   rec = null;
+  session('playback');
 }
 
 const b64 = (buf) => { let s = ''; const u = new Uint8Array(buf); for (let i = 0; i < u.length; i += 0x8000) { s += String.fromCharCode.apply(null, u.subarray(i, i + 0x8000)); } return btoa(s); };
@@ -236,6 +243,7 @@ function phoneVoice(text) {
 
 export async function speak(text, onLevel = () => {}) {
   if (store.get('speak') !== '1' || !text) { return; }
+  if (!rec) { session('playback'); }
   const usePc = await pc.reachable();
   for (const part of chunks(text)) {
     try {

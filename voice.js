@@ -23,6 +23,7 @@ let ctx = null;
 export function unlock() {  // call inside a tap: iOS allows sound only after a gesture
   const AC = window.AudioContext || window.webkitAudioContext;
   session('playback');
+  unlockPlayer();
   if (!AC) { return; }
   if (!ctx) { ctx = new AC(); }
   ctx.resume();
@@ -86,7 +87,9 @@ export async function transcribe(blob) {
     const r = await fetch(`${G}/v1beta/models/${model}:generateContent`, {
       method: 'POST', headers: { 'x-goog-api-key': key, 'Content-Type': 'application/json' },
       body: JSON.stringify({ contents: [{ parts: [{ inline_data: { mime_type: blob.type || 'audio/mp4', data } },
-        { text: 'Запиши дословно, что сказано (русский язык). Только сам текст, без пояснений. Если речи нет — пустой ответ.' }] }] }),
+        { text: 'Запиши дословно, что сказано (русский язык). Только сам текст, без пояснений. Если речи нет — пустой ответ.' }] }],
+        // dictation needs no reasoning: measured 3.8 s -> 2.4 s with the same text
+        ...(model.startsWith('gemini-3') ? { generationConfig: { thinkingConfig: { thinkingLevel: 'minimal' } } } : {}) }),
     });
     const d = await r.json().catch(() => ({}));
     if (r.ok) { return ((((d.candidates || [])[0] || {}).content || {}).parts || []).map((p) => p.text || '').join('').trim(); }
@@ -128,14 +131,18 @@ export async function geminiSpeech(text) {
   throw last;
 }
 
-export function pcmOrWav(data) {  // -> {samples: Float32Array, rate}
+export function pcmOrWav(data) {  // base64 from Gemini -> {samples: Float32Array, rate}
   const bin = atob(data), u = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) { u[i] = bin.charCodeAt(i); }
+  return parseWav(u);
+}
+
+export function parseWav(u) {  // WAV bytes (or raw 16-bit 24 kHz PCM) -> {samples, rate}
   let off = 0, end = u.length, rate = 24000;
   if (u[0] === 0x52 && u[1] === 0x49 && u[2] === 0x46 && u[3] === 0x46) {
     // RIFF: read only the "data" chunk. Gemini appends other chunks after it (a C2PA signature) that
     // would otherwise play as a loud burst and squash the speech when the level is normalised.
-    const dv = new DataView(u.buffer);
+    const dv = new DataView(u.buffer, u.byteOffset, u.byteLength);
     let p = 12, found = false;
     while (p + 8 <= u.length) {
       const id = String.fromCharCode(u[p], u[p + 1], u[p + 2], u[p + 3]), size = dv.getUint32(p + 4, true);
@@ -145,7 +152,7 @@ export function pcmOrWav(data) {  // -> {samples: Float32Array, rate}
     }
     if (!found) { throw new Error('WAV without audio'); }
   }
-  const n = Math.floor((end - off) / 2), out = new Float32Array(n), dv = new DataView(u.buffer, off);
+  const n = Math.floor((end - off) / 2), out = new Float32Array(n), dv = new DataView(u.buffer, u.byteOffset + off);
   for (let i = 0; i < n; i++) { out[i] = dv.getInt16(i * 2, true) / 32768; }
   return { samples: out, rate };
 }
@@ -201,28 +208,94 @@ export function robot3(x, rate) {
   return out;
 }
 
-function play(samples, rate, onLevel) {
+// One <audio> element, unlocked by a tap and reused. On the iPhone it keeps playing after the
+// microphone was used; Web Audio is sometimes left suspended there and the phrase goes silent.
+const player = typeof Audio === 'function' ? new Audio() : null;
+let silence = '', current = null, stopped = false;
+
+function wav(samples, rate) {  // Float32 -> 16-bit mono WAV
+  const n = samples.length, b = new ArrayBuffer(44 + n * 2), v = new DataView(b);
+  const w = (o, t) => { for (let i = 0; i < t.length; i++) { v.setUint8(o + i, t.charCodeAt(i)); } };
+  w(0, 'RIFF'); v.setUint32(4, 36 + n * 2, true); w(8, 'WAVEfmt '); v.setUint32(16, 16, true); v.setUint16(20, 1, true);
+  v.setUint16(22, 1, true); v.setUint32(24, rate, true); v.setUint32(28, rate * 2, true); v.setUint16(32, 2, true);
+  v.setUint16(34, 16, true); w(36, 'data'); v.setUint32(40, n * 2, true);
+  for (let i = 0; i < n; i++) { v.setInt16(44 + i * 2, Math.round(Math.max(-1, Math.min(1, samples[i])) * 32767), true); }
+  return new Blob([b], { type: 'audio/wav' });
+}
+function unlockPlayer() {
+  if (!player || !player.paused) { return; }  // already playing = already unlocked
+  if (!silence) { silence = URL.createObjectURL(wav(new Float32Array(2400), 24000)); }
+  player.src = silence;
+  player.play().catch(() => { /* not inside a tap: the next tap unlocks */ });
+}
+
+function levels(samples, rate) {  // loudness 30 times a second, for the orb
+  const step = Math.floor(rate / 30), out = new Float32Array(Math.ceil(samples.length / step));
+  for (let k = 0; k < out.length; k++) {
+    let p = 0;
+    for (let i = k * step, e = Math.min(samples.length, i + step); i < e; i++) { p = Math.max(p, Math.abs(samples[i])); }
+    out[k] = Math.min(1, p * 1.1);
+  }
+  return out;
+}
+
+function playElement(samples, rate, onLevel) {
+  return new Promise((ok, fail) => {
+    const url = URL.createObjectURL(wav(samples, rate)), env = levels(samples, rate);
+    let on = true;
+    const finish = (err) => {
+      if (!on) { return; }
+      on = false; current = null; onLevel(0);
+      player.onended = player.onerror = null;
+      URL.revokeObjectURL(url);
+      if (err) { fail(err); } else { ok(); }
+    };
+    const follow = () => { if (!on) { return; } onLevel(env[Math.floor(player.currentTime * 30)] || 0); requestAnimationFrame(follow); };
+    player.onended = () => finish();
+    player.onerror = () => finish(new Error('плеер не смог воспроизвести'));
+    current = { stop: () => { player.pause(); finish(); } };
+    player.src = url;
+    player.play().then(follow, finish);
+  });
+}
+
+async function playContext(samples, rate, onLevel) {  // Web Audio, if the player is refused
+  if (!ctx) { throw new Error('звук не разблокирован: нажмите на шар'); }
+  if (ctx.state !== 'running') { await ctx.resume(); }
   return new Promise((ok) => {
     const buf = ctx.createBuffer(1, samples.length, rate);
     buf.copyToChannel(samples, 0);
-    const src = ctx.createBufferSource(), an = ctx.createAnalyser();
-    src.buffer = buf; an.fftSize = 512;
-    src.connect(an); an.connect(ctx.destination);
-    const data = new Uint8Array(an.fftSize);
+    const src = ctx.createBufferSource(), env = levels(samples, rate), t0 = ctx.currentTime;
+    src.buffer = buf;
+    src.connect(ctx.destination);
     let on = true;
-    const follow = () => { if (!on) { return; } an.getByteTimeDomainData(data); let p = 0; for (const v of data) { p = Math.max(p, Math.abs(v - 128)); } onLevel(Math.min(1, p / 70)); requestAnimationFrame(follow); };
-    src.onended = () => { on = false; onLevel(0); ok(); };
+    const follow = () => { if (!on) { return; } onLevel(env[Math.floor((ctx.currentTime - t0) * 30)] || 0); requestAnimationFrame(follow); };
+    src.onended = () => { on = false; current = null; onLevel(0); ok(); };
+    current = { stop: () => { try { src.stop(); } catch (e) { /* ignore */ } } };
     src.start(0); follow();
-    current = src;
   });
 }
-let current = null;
-export function stop() { try { if (current) { current.stop(); } } catch (e) { /* ignore */ } if ('speechSynthesis' in window) { speechSynthesis.cancel(); } }
 
-function chunks(text) {  // the voice servers take up to ~400 characters per phrase
+async function play(samples, rate, onLevel) {
+  if (player) {
+    try { return await playElement(samples, rate, onLevel); } catch (e) { if (stopped) { return; } }
+  }
+  return playContext(samples, rate, onLevel);
+}
+
+export function stop() {  // stops this phrase and the ones still queued
+  stopped = true;
+  if (current) { current.stop(); }
+  if ('speechSynthesis' in window) { speechSynthesis.cancel(); }
+}
+
+function chunks(text) {  // a short first phrase so the voice starts sooner, then up to ~380 characters
   const parts = text.replace(/\s+/g, ' ').match(/[^.!?…]+[.!?…]*\s*/g) || [text];
   const out = []; let cur = '';
-  for (const p of parts) { if ((cur + p).length > 380 && cur) { out.push(cur.trim()); cur = ''; } cur += p; }
+  for (const p of parts) {
+    if ((cur + p).length > (out.length ? 380 : 120) && cur) { out.push(cur.trim()); cur = ''; }
+    cur += p;
+  }
   if (cur.trim()) { out.push(cur.trim().slice(0, 400)); }
   return out;
 }
@@ -241,25 +314,32 @@ function phoneVoice(text) {
   });
 }
 
+async function synth(part, usePc) {
+  if (usePc) {
+    try { return parseWav(new Uint8Array(await pc.speech(part))); } catch (e) { /* PC voice busy: Gemini from the phone */ }
+  }
+  const { samples, rate } = await geminiSpeech(part);
+  return { samples: robot3(samples, rate), rate };
+}
+
 export async function speak(text, onLevel = () => {}) {
   if (store.get('speak') !== '1' || !text) { return; }
   if (!rec) { session('playback'); }
+  stopped = false;
   const usePc = await pc.reachable();
-  for (const part of chunks(text)) {
+  const parts = chunks(text);
+  const make = (part) => synth(part, usePc).catch((error) => ({ error }));
+  let next = make(parts[0]);
+  for (let i = 0; i < parts.length && !stopped; i++) {
+    const got = await next;
+    next = i + 1 < parts.length ? make(parts[i + 1]) : null;  // the next phrase is prepared while this one plays
+    if (stopped) { return; }
     try {
-      if (!ctx) { throw new Error('audio locked'); }
-      if (usePc) {
-        try {
-          const buf = await ctx.decodeAudioData(await pc.speech(part));
-          await play(buf.getChannelData(0), buf.sampleRate, onLevel);
-          continue;
-        } catch (e) { /* PC voice busy: try Gemini from the phone */ }
-      }
-      const { samples, rate } = await geminiSpeech(part);
-      await play(robot3(samples, rate), rate, onLevel);
+      if (got.error) { throw got.error; }
+      await play(got.samples, got.rate, onLevel);
     } catch (e) {
       lastError = e.message || String(e);
-      await phoneVoice(part);
+      if (!stopped) { await phoneVoice(parts[i]); }
     }
   }
 }

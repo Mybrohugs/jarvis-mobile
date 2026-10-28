@@ -61,7 +61,7 @@ async function talkDown(e) {
     const blob = await recording;
     recording = null; $('mic').classList.remove('on'); $('lvl').textContent = '00'; orb.setLevel(0);
     if (blob.size < 2000) { setState('standby'); return; }
-    setState('thinking');
+    setState('thinking'); $('state').textContent = 'распознаю';
     const text = await voice.transcribe(blob);
     if (!text) { show('Не расслышал, сэр.'); setState('standby'); return; }
     await handle(text);

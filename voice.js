@@ -473,7 +473,8 @@ function phoneVoice(text) {
     if (male || ru[0]) { u.voice = male || ru[0]; }
     u.pitch = male ? 0.9 : 0.6;
     // iOS does not always report the end (after cancel especially): stop() and a timer also finish it
-    const t = setTimeout(() => done(), 4000 + text.length * 90);
+    // ~14 characters a second; the old 4 s + 90 ms/char left a long answer "frozen" for over a minute
+    const t = setTimeout(() => { speechSynthesis.cancel(); done(); }, 2000 + text.length * 80);
     const done = () => { clearTimeout(t); current = null; ok(); };
     u.onend = u.onerror = done;
     current = { stop: done };
@@ -514,8 +515,20 @@ export async function speak(text, onLevel = () => {}, onStart = () => {}) {
   if (heard.error) { lastError = heard.error.message || String(heard.error); abort.abort(); }  // no sound: stop the stream
   await feeding;
   if (stopped) { return; }
+  let left = heard.error ? (heard.played ? '' : text) : failed >= 0 ? parts.slice(failed).join(' ') : '';
+  // Gemini could not voice it (daily quota, offline): the PC's JARVIS voice, as loud as Gemini's.
+  // Not after a playback error: then the phone itself refused sound and the PC voice would fail too.
+  if (left && !heard.error && pc.knownAlive()) {
+    try {
+      const w = parseWav(await pc.speech(left));
+      if (stopped) { return; }
+      begin();
+      await play(loud(w.samples, w.rate), w.rate, onLevel);
+      left = '';
+    } catch (e) { lastError = (e && e.message) || String(e); }
+  }
+  if (stopped) { return; }
   // the phone's own voice says what JARVIS's voice could not
-  const left = heard.error ? (heard.played ? '' : text) : failed >= 0 ? parts.slice(failed).join(' ') : '';
   for (const p of left ? chunks(left, 380) : []) {
     if (stopped) { break; }
     begin();

@@ -81,6 +81,15 @@ export async function upload(file) {
   return data;
 }
 
+// JARVIS's voice made on the PC (Piper with the robot-3 effect, no daily quota): used when Gemini's free
+// voice quota is used up, instead of the phone's own quiet voice. Returns WAV bytes.
+export async function speech(text) {
+  const r = await call('/api/speech', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text: text.slice(0, 1000) }) }, 60000);
+  if (!r.ok) { throw new Error('голос компьютера: HTTP ' + r.status); }
+  return new Uint8Array(await r.arrayBuffer());
+}
+
 export async function listen(blob) {
   const r = await call('/api/listen', { method: 'POST', body: blob, headers: { 'Content-Type': blob.type || 'audio/mp4' } }, 60000);
   const data = await r.json();

@@ -222,7 +222,7 @@ async function status() {
   const up = await pc.reachable(true);
   $('pcstate').textContent = !pc.configured() ? 'не подключён' : up ? 'на связи' : 'нет связи';
   $('dot').classList.toggle('off', !store.get('claudeKey'));
-  $('conn').textContent = store.get('claudeKey') ? 'автономно' : 'нет ключа';
+  $('conn').textContent = store.get('claudeKey') ? 'в сети' : 'нет ключа';
 }
 function clock() {
   const d = new Date();

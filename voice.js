@@ -117,18 +117,24 @@ async function geminiSpeech(text) {
   throw last;
 }
 
-function pcmOrWav(data) {  // -> {samples: Float32Array, rate}
+export function pcmOrWav(data) {  // -> {samples: Float32Array, rate}
   const bin = atob(data), u = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) { u[i] = bin.charCodeAt(i); }
-  let off = 0, rate = 24000;
-  if (u[0] === 0x52 && u[1] === 0x49 && u[2] === 0x46 && u[3] === 0x46) {  // RIFF: find "data"
+  let off = 0, end = u.length, rate = 24000;
+  if (u[0] === 0x52 && u[1] === 0x49 && u[2] === 0x46 && u[3] === 0x46) {
+    // RIFF: read only the "data" chunk. Gemini appends other chunks after it (a C2PA signature) that
+    // would otherwise play as a loud burst and squash the speech when the level is normalised.
     const dv = new DataView(u.buffer);
-    rate = dv.getUint32(24, true);
-    off = 12;
-    while (off < u.length - 8 && String.fromCharCode(u[off], u[off + 1], u[off + 2], u[off + 3]) !== 'data') { off += 8 + dv.getUint32(off + 4, true); }
-    off += 8;
+    let p = 12, found = false;
+    while (p + 8 <= u.length) {
+      const id = String.fromCharCode(u[p], u[p + 1], u[p + 2], u[p + 3]), size = dv.getUint32(p + 4, true);
+      if (id === 'fmt ') { rate = dv.getUint32(p + 12, true); }
+      if (id === 'data') { off = p + 8; end = Math.min(u.length, off + size); found = true; break; }
+      p += 8 + size + (size & 1);
+    }
+    if (!found) { throw new Error('WAV without audio'); }
   }
-  const n = Math.floor((u.length - off) / 2), out = new Float32Array(n), dv = new DataView(u.buffer, off);
+  const n = Math.floor((end - off) / 2), out = new Float32Array(n), dv = new DataView(u.buffer, off);
   for (let i = 0; i < n; i++) { out[i] = dv.getInt16(i * 2, true) / 32768; }
   return { samples: out, rate };
 }
@@ -165,17 +171,22 @@ export function robot3(x, rate) {
   const win = 160; let acc = 0; const env = new Float32Array(n);  // compressor (threshold 0.22, ratio 3)
   for (let i = 0; i < n; i++) { acc += Math.abs(y[i]) - (i >= win ? Math.abs(y[i - win]) : 0); env[i] = acc / win; }
   for (let i = 0; i < n; i++) { const over = Math.max(env[i] / 0.22, 1); y[i] /= Math.pow(over, 1 - 1 / 3); }
-  const out = Float32Array.from(y);
+  const out = new Float32Array(n + Math.floor(rate * 0.05));  // 50 ms for the room echo to die out
+  out.set(y);
   for (const [ms, g] of [[7, 0.22], [13, 0.16], [19, 0.12], [29, 0.08]]) {
-    const d = Math.floor(rate * ms / 1000); for (let i = d; i < n; i++) { out[i] += level * g * y[i - d]; }
+    const d = Math.floor(rate * ms / 1000); for (let i = d; i < n + d && i < out.length; i++) { out[i] += level * g * y[i - d]; }
   }
   for (let i = 0; i < n; i++) {  // digital double: 11 ms +- 0.25 ms at 0.3 Hz
     const t = i - (11 + 0.25 * Math.sin(2 * Math.PI * 0.3 * i / rate)) * rate / 1000, j = Math.floor(t);
     if (j >= 0 && j + 1 < n) { out[i] += level * 0.14 * (y[j] + (y[j + 1] - y[j]) * (t - j)); }
   }
   const dm = Math.floor(rate * 0.0011); for (let i = dm; i < n; i++) { out[i] += level * 0.07 * y[i - dm]; }
-  let peak = 1e-9; for (let i = 0; i < n; i++) { peak = Math.max(peak, Math.abs(out[i])); }
-  for (let i = 0; i < n; i++) { out[i] = Math.max(-1, Math.min(1, out[i] / peak * 0.89)); }
+  const m = out.length, fade = Math.floor(rate * 0.012);
+  let peak = 1e-9; for (let i = 0; i < m; i++) { peak = Math.max(peak, Math.abs(out[i])); }
+  for (let i = 0; i < m; i++) {
+    const g = Math.min(1, i / fade, (m - 1 - i) / fade);  // 12 ms fade in and out: no click
+    out[i] = Math.max(-1, Math.min(1, out[i] / peak * 0.89)) * g;
+  }
   return out;
 }
 

@@ -254,6 +254,57 @@ $('awake').onchange = async (e) => {
   catch (err) { e.target.checked = false; }
 };
 
+// ---------- Siri: the Shortcut posts to the PC's /api/say with this phone's PC key ----------
+$('siricopy').onclick = async () => {
+  if (!pc.configured()) { $('sirimsg').textContent = 'Сначала подключите компьютер.'; return; }
+  const url = store.get('pcUrl').replace(/\/+$/, '') + '/api/say';
+  try {
+    await navigator.clipboard.writeText(url + '\nBearer ' + store.get('pcToken'));
+    $('sirimsg').textContent = 'Скопировано: первая строка — адрес, вторая — ключ. Это пароль к ПК, никому не пересылайте.';
+  } catch (e) { $('sirimsg').textContent = 'Не удалось скопировать: ' + e.message; }
+};
+
+// ---------- Web Push from the PC ----------
+function keyBytes(b64) {
+  const s = atob(b64.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - (b64.length % 4)) % 4));
+  return Uint8Array.from(s, (c) => c.charCodeAt(0));
+}
+$('pushon').onclick = async () => {
+  const msg = (t) => { $('pushmsg').textContent = t; };
+  try {
+    if (!pc.configured()) { msg('Сначала подключите компьютер.'); return; }
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+      msg('Уведомления работают, только если открыть JARVIS с экрана «Домой» (Поделиться → На экран «Домой»).');
+      return;
+    }
+    if (await Notification.requestPermission() !== 'granted') { msg('Уведомления не разрешены в настройках iPhone.'); return; }
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: keyBytes(await pc.pushKey()) });
+    await pc.pushSubscribe(sub.toJSON());
+    msg('Уведомления включены.');
+    pc.report('push subscribed');
+  } catch (e) {
+    msg('Не удалось включить: ' + e.message);
+    pc.report('push: ' + e.message);
+  }
+};
+
+// ---------- debug console (Eruda, bundled in vendor/, loaded only when switched on) ----------
+function debugConsole(on) {
+  if (on && !window.eruda) {
+    const s = document.createElement('script');
+    s.src = 'vendor/eruda.js';
+    s.onload = () => { window.eruda.init({ tool: ['console', 'network', 'resources', 'info'] }); };
+    document.head.appendChild(s);
+  } else if (!on && window.eruda) {
+    window.eruda.destroy();
+    delete window.eruda;
+  }
+}
+$('debug').checked = store.get('debug') === '1';
+$('debug').onchange = (e) => { store.set('debug', e.target.checked ? '1' : ''); debugConsole(e.target.checked); };
+debugConsole(store.get('debug') === '1');
+
 // ---------- status line & clock ----------
 async function status() {
   const up = await pc.reachable(true);

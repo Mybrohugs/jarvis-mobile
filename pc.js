@@ -98,6 +98,15 @@ export function report(event) {
     body: JSON.stringify({ event: ('mobile ' + event).slice(0, 120) }) }, 5000).catch(() => {});
 }
 
+// Web Push from the PC (reminders, briefings): the PC's public VAPID key, then this phone's subscription.
+export async function pushKey() {
+  const r = await call('/api/push/key', {}, 10000);
+  const data = await r.json();
+  if (!r.ok || !data.key) { throw new Error(data.error || 'HTTP ' + r.status); }
+  return data.key;
+}
+export const pushSubscribe = (subscription) => jsonPost('/api/push/subscribe', { subscription }, 10000);
+
 export async function listen(blob) {
   const r = await call('/api/listen', { method: 'POST', body: blob, headers: { 'Content-Type': blob.type || 'audio/mp4' } }, 60000);
   const data = await r.json();

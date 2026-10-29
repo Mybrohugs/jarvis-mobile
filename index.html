@@ -102,9 +102,25 @@
     <button id="pcpair" type="button" class="wide">Подключить компьютер</button>
     <p id="pcmsg" class="muted small"></p>
 
+    <h2 class="hud">Siri</h2>
+    <button id="siricopy" type="button" class="wide">Скопировать ключ для Siri</button>
+    <p class="muted small">Команды → «+» → «Продиктовать текст» → «Получить содержимое URL»: адрес из буфера, метод POST,
+      заголовок Authorization = ключ, тело JSON: text = «Продиктованный текст» → «Получить значение» speech →
+      «Произнести текст». Назовите команду «Джарвис» и скажите: «Привет, Siri, Джарвис».</p>
+    <p id="sirimsg" class="muted small"></p>
+
+    <h2 class="hud">Уведомления</h2>
+    <button id="pushon" type="button" class="wide">Включить уведомления с ПК</button>
+    <p class="muted small">Напоминания и сводки от JARVIS. На iPhone работают, только если JARVIS открыт с экрана «Домой».</p>
+    <p id="pushmsg" class="muted small"></p>
+
     <h2 class="hud">Брифинг</h2>
     <input id="city" autocomplete="off" placeholder="город для погоды">
     <label class="check"><input id="awake" type="checkbox"> Экран не гаснет</label>
+
+    <h2 class="hud">Отладка</h2>
+    <label class="check"><input id="debug" type="checkbox"> Консоль отладки (Eruda)</label>
+    <p class="muted small">Кнопка консоли в углу экрана: ошибки, запросы к ПК и Claude. В ней видны ключи этого телефона — не показывайте экран посторонним.</p>
 
     <button id="save" type="button" class="wide">Сохранить</button>
     <button id="forget" type="button" class="wide danger">Стереть ключи и настройки с телефона</button>

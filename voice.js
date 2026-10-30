@@ -3,6 +3,7 @@
 // male voice as the last resort.
 import * as store from './store.js';
 import * as pc from './pc.js';
+import { chunks } from './speech_text.js';
 
 const G = 'https://generativelanguage.googleapis.com';
 // each TTS model has its own free daily quota; a 429 moves on with the same voice (as on the PC)
@@ -331,17 +332,6 @@ export function stop() {  // stops the voice now: playback, the queue and the re
   kick();
 }
 
-function chunks(text, limit) {  // pieces of whole sentences, each at most `limit` characters
-  const parts = text.replace(/\s+/g, ' ').match(/[^.!?…]+[.!?…]*\s*/g) || [text];
-  const out = []; let cur = '';
-  for (const p of parts) {
-    if ((cur + p).length > limit && cur) { out.push(cur.trim()); cur = ''; }
-    cur += p;
-  }
-  if (cur.trim()) { out.push(cur.trim().slice(0, limit + 20)); }
-  return out;
-}
-
 // ---------- streaming voice ----------
 // Gemini 3.x TTS streams raw 16-bit 24 kHz PCM while it speaks (first sound in ~1 s instead of 4-8 s for
 // the whole phrase; measured). The stream is cut into pieces at pauses in the speech, each piece gets the
@@ -529,14 +519,20 @@ export async function speak(text, onLevel = () => {}, onStart = () => {}) {
   // Gemini could not voice it (daily quota, offline): the PC's JARVIS voice, as loud as Gemini's.
   // Not after a playback error: then the phone itself refused sound and the PC voice would fail too.
   if (left && !heard.error && pc.knownAlive()) {
+    const pending = chunks(left, 1000);
+    let spoken = 0;
     try {
-      const w = parseWav(await pc.speech(left));
-      if (stopped) { return; }
-      begin();
-      await play(loud(w.samples, w.rate), w.rate, onLevel);
-      left = '';
+      for (const part of pending) {
+        const w = parseWav(await pc.speech(part));
+        if (stopped) { return; }
+        begin();
+        await play(loud(w.samples, w.rate), w.rate, onLevel);
+        if (stopped) { return; }
+        spoken++;
+      }
       lastError = '';  // JARVIS's voice was heard (the PC's): nothing to report
     } catch (e) { lastError = (e && e.message) || String(e); }
+    left = pending.slice(spoken).join(' ');
   }
   if (stopped) { return; }
   // the phone's own voice says what JARVIS's voice could not

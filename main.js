@@ -4,6 +4,7 @@ import * as brain from './brain.js';
 import * as voice from './voice.js';
 import * as google from './google.js';
 import * as pc from './pc.js';
+import { sharedVideo } from './tv_share.js';
 
 const $ = (id) => document.getElementById(id);
 const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) { n.className = cls; } if (text !== undefined) { n.textContent = text; } return n; };
@@ -77,6 +78,26 @@ async function run(text) {
 }
 
 $('ask').onsubmit = (e) => { e.preventDefault(); voice.unlock(); askedAt = performance.now(); const t = $('say').value; $('say').value = ''; handle(t); };
+
+// ---------- video to Sony TV (explicit owner action, never from search results) ----------
+const shared = sharedVideo(window.location.search);
+if (shared) {
+  $('tvurl').value = shared;
+  $('tvpanel').open = true;
+  $('tvmsg').textContent = 'Ссылка добавлена. Проверьте её и нажмите «На ТВ», чтобы отправить.';
+}
+$('tvform').onsubmit = async (e) => {
+  e.preventDefault();
+  if ($('tvsend').disabled) { return; }
+  $('tvsend').disabled = true;
+  $('tvmsg').textContent = 'Отправляю через компьютер…';
+  try {
+    const result = await pc.castVideo($('tvurl').value);
+    $('tvmsg').textContent = result.speech || 'Команда отправлена телевизору. Проверьте воспроизведение на экране ТВ.';
+  } catch (err) {
+    $('tvmsg').textContent = 'Не удалось: ' + err.message;
+  } finally { $('tvsend').disabled = false; }
+};
 
 // ---------- push-to-talk: hold the orb or the mic; a short tap starts, the next tap sends ----------
 let recording = null;
@@ -218,7 +239,7 @@ function fillSettings() {
   for (const [id, key] of Object.entries(FORM)) { $(id).value = store.get(key); }
   $('speak').checked = store.get('speak') === '1';
   $('gstate').textContent = !google.configured() ? 'Не настроено.' : google.signedIn() ? 'Вход выполнен.' : 'Нужно войти.';
-  $('pcmsg').textContent = pc.configured() ? 'Компьютер подключён.' : 'Не подключён (нужен только для файлов).';
+  $('pcmsg').textContent = pc.configured() ? 'Компьютер подключён.' : 'Не подключён (нужен для файлов и видео на ТВ).';
 }
 function settings(open) { if (open) { fillSettings(); } $('settings').hidden = !open; }
 $('gear').onclick = () => settings(true);

@@ -62,6 +62,44 @@ export const say = (text) => jsonPost('/api/say', { text }, 70000);  // the PC i
 export const find = (query) => say('найди на компьютере ' + query);
 export const send = (index) => say('отправь файл ' + index);
 
+// Only the owner's explicit TV form submission calls this endpoint.
+export async function castVideo(value) {
+  if (!configured()) { throw new Error('сначала подключите компьютер в настройках JARVIS'); }
+  const url = String(value || '').trim();
+  let parsed;
+  try { parsed = new URL(url); } catch (e) { throw new Error('вставьте полную ссылку на видео (https://…)'); }
+  if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password || url.length > 2000) {
+    throw new Error('нужна ссылка HTTP/HTTPS без пароля, длиной до 2000 символов');
+  }
+  try {
+    const data = await jsonPost('/api/tv/play', { url }, 30000);
+    if (data.status !== 'pending' || !data.id) { throw new Error(data.error || 'компьютер не подтвердил добавление команды в очередь'); }
+    const pending = { ...data, speech: 'Запрос в очереди ПК. Воспроизведение ещё не подтверждено; проверьте телевизор.' };
+    const deadline = Date.now() + 60000;
+    while (Date.now() < deadline) {
+      try {
+        const response = await call('/api/queue', {}, 4000);
+        if (!response.ok) { return pending; }
+        const queue = await response.json();
+        const item = (queue.items || []).find((entry) => entry.id === data.id);
+        if (item && ['done', 'failed', 'dismissed'].includes(item.status)) {
+          return { ...item, speech: item.speech || (item.status === 'done'
+            ? 'Команда передана телевизору. Проверьте воспроизведение на экране ТВ.' : 'Запрос не выполнен. Проверьте подключение телевизора на ПК.') };
+        }
+      } catch (e) {
+        // The POST already queued the request: a lost connection must never send it twice.
+        return { ...pending, speech: 'Запрос добавлен в очередь, но связь с ПК потеряна. Проверьте телевизор перед повторной отправкой.' };
+      }
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+    }
+    return pending;
+  } catch (e) {
+    if (e.name === 'AbortError') { throw new Error('компьютер не ответил вовремя; проверьте ПК и Tailscale'); }
+    if (e instanceof TypeError) { throw new Error('нет связи с компьютером; включите ПК и Tailscale'); }
+    throw e;
+  }
+}
+
 export async function download(link) {
   if (!/^\/api\/file\/[A-Za-z0-9_-]{20,40}$/.test(link)) { throw new Error('bad link'); }
   const r = await call(link, {}, 120000);

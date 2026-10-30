@@ -52,6 +52,15 @@
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h15M13 6l6 6-6 6"/></svg>
       </button>
     </form>
+    <details id="tvpanel" class="tvpanel">
+      <summary>Видео на телевизоре</summary>
+      <p class="muted small">Вставьте ссылку YouTube или прямую ссылку MP4/WebM/M3U8. Нужны включённый ПК, Tailscale и настроенный телевизор с Google Cast.</p>
+      <form id="tvform" class="askbar">
+        <input id="tvurl" type="url" maxlength="2000" required placeholder="https://…" aria-label="Ссылка на видео" autocomplete="off" enterkeyhint="send">
+        <button id="tvsend" type="submit">На ТВ</button>
+      </form>
+      <p id="tvmsg" class="muted small" role="status" aria-live="polite">Команда отправляется только кнопкой «На ТВ». Возможность воспроизведения зависит от телевизора и видео.</p>
+    </details>
   </section>
 
   <section id="calendar" class="pane" hidden>
@@ -96,7 +105,7 @@
     <button id="glogin" type="button" class="wide">Войти в Google</button>
     <p id="gstate" class="muted small"></p>
 
-    <h2 class="hud">Компьютер (файлы)</h2>
+    <h2 class="hud">Компьютер (файлы и ТВ)</h2>
     <input id="pcurl" autocomplete="off" placeholder="https://ваш-пк.….ts.net">
     <input id="pccode" inputmode="numeric" autocomplete="one-time-code" placeholder="6-значный код с ПК">
     <button id="pcpair" type="button" class="wide">Подключить компьютер</button>

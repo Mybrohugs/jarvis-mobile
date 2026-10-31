@@ -1,0 +1,9 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'">
+<title>Подключить телефон к JARVIS DEV</title><link rel="stylesheet" href="mobile.css"><link rel="stylesheet" href="connect.css"></head>
+<body><main class="connectcard"><h1>Подключить телефон</h1><p>JARVIS DEV · проверка видео</p><p id="address"></p>
+<p>Введите свежий шестизначный код с компьютера.</p>
+<form id="pairform"><label for="code">Код сопряжения</label><input id="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required autofocus><button id="connect" type="submit">Подключить</button></form>
+<p id="message" role="status" aria-live="polite"></p><a id="open" href="./" hidden>Открыть JARVIS</a>
+<p>Подключение сохраняется в этом браузере для этого адреса.</p></main><script type="module" src="connect.js"></script></body></html>

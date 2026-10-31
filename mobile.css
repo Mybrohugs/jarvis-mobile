@@ -13,3 +13,19 @@ select { width: 100%; font: 500 15px var(--hud); color: var(--cyan2); background
 .list .day::before { display: none; }
 .sheet input[type=password], .sheet input:not([type]), .sheet input[inputmode] { margin: 6px 0; }
 .ok { color: var(--ok); } .bad { color: var(--bad); }
+
+/* Explicit video handoff through the paired PC. */
+#tvpanel { margin-top: 12px; }
+#tvpanel summary { color: var(--cyan2, #b5eefa); cursor: pointer; }
+#tvurl { min-width: 0; flex: 1; color: #c6f1ff; background: transparent; border: 0; padding: 12px; font: inherit; }
+#tvsend { flex-shrink: 0; color: #c6f1ff; background: transparent; border: 1px solid #174354; padding: 12px; font: inherit; }
+#tvsend:disabled { opacity: .5; }
+
+#tvcode { min-width: 0; flex: 1; color: #c6f1ff; background: transparent; border: 0; padding: 12px; font: inherit; }
+#tvpairbutton { flex-shrink: 0; color: #c6f1ff; background: transparent; border: 1px solid #174354; padding: 12px; font: inherit; }
+
+/* The separate DEV origin is a focused TV trial, independent of cloud AI. */
+body.tvdevmode nav, body.tvdevmode .hudwrap, body.tvdevmode #ask,
+body.tvdevmode #state, body.tvdevmode #reply, body.tvdevmode #extra,
+body.tvdevmode #gear { display: none !important; }
+body.tvdevmode #station { min-height: 0 !important; }

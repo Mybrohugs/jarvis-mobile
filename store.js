@@ -1,8 +1,8 @@
 // Settings and keys live only on this phone (localStorage of this site). Nothing is sent anywhere
 // except to the service each key belongs to.
 const PREFIX = 'jarvis.mobile.';
-export const FIELDS = ['claudeKey', 'geminiKey', 'model', 'googleClientId', 'pcUrl', 'pcToken', 'city', 'speak'];
-const DEFAULTS = { model: 'claude-sonnet-5-5', speak: '1', city: 'Москва' };
+export const FIELDS = ['googleClientId', 'pcUrl', 'pcToken', 'city', 'speak'];
+const DEFAULTS = { speak: '1', city: 'Москва' };
 
 export function get(name) {
   try { return localStorage.getItem(PREFIX + name) ?? DEFAULTS[name] ?? ''; } catch (e) { return DEFAULTS[name] ?? ''; }

@@ -1,17 +1,6 @@
-// Voice in and out. In: record -> PC Whisper (if the PC is known to be on) or Gemini transcription.
-// Out: Gemini TTS streamed to the phone + the PC's robot-3 effect ported to JS -> the phone's own
-// male voice as the last resort.
+// Voice: record -> local PC transcription; speech -> phone voice.
 import * as store from './store.js';
 import * as pc from './pc.js';
-
-const G = 'https://generativelanguage.googleapis.com';
-// each TTS model has its own free daily quota; a 429 moves on with the same voice (as on the PC)
-const TTS = [['gemini-3.8-flash-tts', true], ['gemini-3.8-flash-lite-tts', true],
-  ['gemini-3.1-flash-tts-preview', false], ['gemini-2.5-flash-preview-tts', false]];
-const STT = ['gemini-3.5-flash', 'gemini-flash-latest'];
-const VOICE = 'Schedar';
-const STYLE = 'Спокойный, вежливый и уверенный британский дворецкий-ассистент: ровный бархатный голос, лёгкая ирония, без спешки, чёткая дикция.';
-const INLINE = 'Say in a calm, warm, low British butler voice, in Russian: ';
 
 // iPhone: 'playback' keeps the voice audible with the ring/silent switch on, but it cannot record,
 // so the microphone switches to 'play-and-record' and back. Older iOS has no audioSession: no-op.
@@ -78,70 +67,15 @@ export function stopRecording() {
 const b64 = (buf) => { let s = ''; const u = new Uint8Array(buf); for (let i = 0; i < u.length; i += 0x8000) { s += String.fromCharCode.apply(null, u.subarray(i, i + 0x8000)); } return btoa(s); };
 
 export async function transcribe(blob) {
-  if (pc.knownAlive()) {  // never waits for an offline PC
-    try { return await pc.listen(blob); } catch (e) { /* fall through to Gemini */ }
-  }
-  const key = store.get('geminiKey');
-  if (!key) { throw new Error('для голоса без компьютера нужен ключ Gemini (Настройки)'); }
-  if (store.off('gemini')) { throw new Error('Gemini недоступен из этой сети, а компьютер не ответил'); }
-  const data = b64(await blob.arrayBuffer());
-  let last = null;
-  for (const model of STT) {
-    const r = await fetch(`${G}/v1beta/models/${model}:generateContent`, {
-      method: 'POST', headers: { 'x-goog-api-key': key, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ contents: [{ parts: [{ inline_data: { mime_type: blob.type || 'audio/mp4', data } },
-        { text: 'Запиши дословно, что сказано (русский язык). Только сам текст, без пояснений. Если речи нет — пустой ответ.' }] }],
-        // dictation needs no reasoning: measured 3.8 s -> 2.4 s with the same text
-        ...(model.startsWith('gemini-3') ? { generationConfig: { thinkingConfig: { thinkingLevel: 'minimal' } } } : {}) }),
-    });
-    const d = await r.json().catch(() => ({}));
-    if (r.ok) { return ((((d.candidates || [])[0] || {}).content || {}).parts || []).map((p) => p.text || '').join('').trim(); }
-    last = new Error((d.error && d.error.message) || 'Gemini HTTP ' + r.status);
-    if (geoRefused(last)) { break; }
-    if (r.status !== 429 && r.status !== 503) { break; }
-  }
-  throw last || new Error('распознавание Gemini недоступно');
+  if (!pc.configured()) { throw new Error('Подключите телефон к ПК для распознавания речи.'); }
+  return await pc.listen(blob);
 }
 
 // ---------- speaking ----------
-function rest() { try { return JSON.parse(localStorage.getItem('jarvis.mobile.ttsRest') || '{}'); } catch (e) { return {}; } }
-function setRest(m) { const r = rest(); r[m] = Date.now() + 30 * 60000; try { localStorage.setItem('jarvis.mobile.ttsRest', JSON.stringify(r)); } catch (e) { /* ignore */ } }
-
-// Gemini refuses this network outright ("not available in your current location"): no model will answer,
-// so Gemini is skipped for an hour and the PC does the voice.
-function geoRefused(e) { if (/location|region/i.test(e.message)) { store.setOff('gemini'); return true; } return false; }
-
-export let lastError = '';  // why the phone fell back to its own voice (shown once on screen)
+export let lastError = '';
 export function clearError() { lastError = ''; }
-export async function geminiSpeech(text) {
-  const key = store.get('geminiKey');
-  if (!key) { throw new Error('no gemini key'); }
-  if (store.off('gemini')) { throw new Error('Gemini недоступен из этой сети'); }
-  let last = null;
-  for (const [model, meta] of TTS) {
-    if ((rest()[model] || 0) > Date.now()) { continue; }
-    const content = meta ? { type: 'text', text, annotations: [{ type: 'speech_metadata', style: STYLE }] } : { type: 'text', text: INLINE + text };
-    const r = await fetch(`${G}/v1beta/interactions`, {
-      method: 'POST', headers: { 'x-goog-api-key': key, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model, input: [{ type: 'user_input', content: [content] }], response_format: { type: 'audio' },
-        generation_config: { speech_config: [{ voice: VOICE }] } }),
-    });
-    const d = await r.json().catch(() => ({}));
-    if (r.ok) {
-      for (const step of d.steps || []) {
-        for (const part of step.content || []) { if (part && part.data) { return pcmOrWav(part.data); } }
-      }
-      last = new Error('Gemini returned no audio');
-      continue;
-    }
-    last = new Error((d.error && d.error.message) || 'Gemini HTTP ' + r.status);
-    if (r.status === 429) { setRest(model); }
-    if (geoRefused(last)) { break; }
-  }
-  throw last || new Error('голос Gemini на отдыхе: дневной лимит исчерпан');
-}
 
-export function pcmOrWav(data) {  // base64 from Gemini -> {samples: Float32Array, rate}
+export function pcmOrWav(data) {  // base64 audio -> {samples: Float32Array, rate}
   const bin = atob(data), u = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) { u[i] = bin.charCodeAt(i); }
   return parseWav(u);
@@ -150,7 +84,7 @@ export function pcmOrWav(data) {  // base64 from Gemini -> {samples: Float32Arra
 export function parseWav(u) {  // WAV bytes (or raw 16-bit 24 kHz PCM) -> {samples, rate}
   let off = 0, end = u.length, rate = 24000;
   if (u[0] === 0x52 && u[1] === 0x49 && u[2] === 0x46 && u[3] === 0x46) {
-    // RIFF: read only the "data" chunk. Gemini appends other chunks after it (a C2PA signature) that
+    // RIFF: read only the "data" chunk. Some encoders append other chunks after it (a C2PA signature) that
     // would otherwise play as a loud burst and squash the speech when the level is normalised.
     const dv = new DataView(u.buffer, u.byteOffset, u.byteLength);
     let p = 12, found = false;
@@ -323,7 +257,7 @@ async function play(samples, rate, onLevel) {
 }
 
 let kick = () => {}, abort = null;
-export function stop() {  // stops the voice now: playback, the queue and the request to Gemini
+export function stop() {  // stops the voice now: playback, the queue and the audio request
   stopped = true;
   if (abort) { abort.abort(); }
   if (current) { current.stop(); }
@@ -343,67 +277,13 @@ function chunks(text, limit) {  // pieces of whole sentences, each at most `limi
 }
 
 // ---------- streaming voice ----------
-// Gemini 3.x TTS streams raw 16-bit 24 kHz PCM while it speaks (first sound in ~1 s instead of 4-8 s for
-// the whole phrase; measured). The stream is cut into pieces at pauses in the speech, each piece gets the
-// robot-3 effect and the same loudness, and the pieces play one after another: the joins fall in pauses.
-const RATE = 24000;
-
 function pcm16(b64data) {
   const bin = atob(b64data), n = bin.length >> 1, out = new Float32Array(n);
   for (let i = 0; i < n; i++) { const v = bin.charCodeAt(2 * i) | (bin.charCodeAt(2 * i + 1) << 8); out[i] = (v >= 32768 ? v - 65536 : v) / 32768; }
   return out;
 }
 
-async function geminiStream(text, onPcm, signal) {  // resolves when the stream ends; throws if no audio came
-  const key = store.get('geminiKey');
-  if (!key) { throw new Error('нет ключа Gemini'); }
-  let last = null;
-  for (const [model, meta] of TTS) {
-    if ((rest()[model] || 0) > Date.now()) { continue; }
-    const part = meta ? { text, speech_metadata: { style: STYLE } } : { text: INLINE + text };
-    let r, got = 0;
-    try {
-      r = await fetch(`${G}/v1beta/models/${model}:streamGenerateContent?alt=sse`, {
-        method: 'POST', signal, headers: { 'x-goog-api-key': key, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ contents: [{ role: 'user', parts: [part] }],
-          generationConfig: { responseModalities: ['AUDIO'], speechConfig: { voiceConfig: { voice: VOICE } } } }),
-      });
-      if (!r.ok) {
-        const d = await r.json().catch(() => ({}));
-        last = new Error((d.error && d.error.message) || 'Gemini HTTP ' + r.status);
-        if (r.status === 429) { setRest(model); }
-        if (geoRefused(last)) { break; }
-        continue;
-      }
-      const reader = r.body.getReader(), dec = new TextDecoder();
-      let buf = '';
-      for (;;) {
-        const { value, done } = await reader.read();
-        if (done) { break; }
-        buf += dec.decode(value, { stream: true });
-        let nl;
-        while ((nl = buf.indexOf('\n')) >= 0) {
-          const line = buf.slice(0, nl).trim();
-          buf = buf.slice(nl + 1);
-          if (!line.startsWith('data:')) { continue; }
-          let d;
-          try { d = JSON.parse(line.slice(5)); } catch (e) { continue; }
-          for (const p of (((d.candidates || [])[0] || {}).content || {}).parts || []) {
-            if (p.inlineData && p.inlineData.data) { got++; onPcm(pcm16(p.inlineData.data)); }
-          }
-        }
-      }
-    } catch (e) {
-      if (signal.aborted) { throw e; }
-      if (got) { return; }  // broke off mid-phrase: keep what was said
-      last = e;
-      continue;
-    }
-    if (got) { return; }
-    last = new Error('Gemini не прислал звук');
-  }
-  throw last || new Error('голос Gemini на отдыхе: дневной лимит исчерпан');
-}
+
 
 function quietAt(x, from, to) {  // middle of the latest 60 ms pause in x[from, to), or -1
   const w = Math.floor(RATE * 0.06);
@@ -491,58 +371,16 @@ function phoneVoice(text) {
   });
 }
 
-// Speak an answer. onStart fires when the first sound plays. Order: Gemini streamed straight from the
-// phone (faster than the PC's voice server, which makes whole phrases), Gemini whole phrases, and the
-// phone's own voice as the last resort.
+// Speak using the phone voice without any cloud key.
 export async function speak(text, onLevel = () => {}, onStart = () => {}) {
   if (store.get('speak') !== '1' || !text) { return; }
   if (!rec) { session('playback'); }
   stopped = false;
-  abort = new AbortController();
-  let started = false;
-  const begin = () => { if (!started) { started = true; onStart(); } };
-  const parts = chunks(text, 1500);  // one request per answer as a rule: the free voice quota is per request
-  const line = voiceLine(onLevel, begin);
-  let failed = -1;
-  const feeding = (async () => {  // Gemini fills the line while it plays
-    try {
-      if (store.off('gemini')) { failed = 0; return; }  // refused from this network: the PC voice below
-      for (let i = 0; i < parts.length && !abort.signal.aborted; i++) {
-        try { await geminiStream(parts[i], (pcm) => line.push(pcm), abort.signal); }
-        catch (e) {
-          if (abort.signal.aborted) { break; }
-          try { const w = await geminiSpeech(parts[i]); line.push(w.samples); }  // streaming refused: whole phrase
-          catch (e2) { lastError = (e2 && e2.message) || String(e2); failed = i; break; }
-        }
-      }
-    } catch (e) {
-      lastError = (e && e.message) || String(e); failed = Math.max(failed, 0);
-    } finally {
-      line.end();  // whatever happened, the line finishes: nothing waits forever
-    }
-  })();
-  const heard = await line.done;
-  if (heard.error) { lastError = heard.error.message || String(heard.error); abort.abort(); }  // no sound: stop the stream
-  await feeding;
-  if (stopped) { return; }
-  let left = heard.error ? (heard.played ? '' : text) : failed >= 0 ? parts.slice(failed).join(' ') : '';
-  // Gemini could not voice it (daily quota, offline): the PC's JARVIS voice, as loud as Gemini's.
-  // Not after a playback error: then the phone itself refused sound and the PC voice would fail too.
-  if (left && !heard.error && pc.knownAlive()) {
-    try {
-      const w = parseWav(await pc.speech(left));
-      if (stopped) { return; }
-      begin();
-      await play(loud(w.samples, w.rate), w.rate, onLevel);
-      left = '';
-      lastError = '';  // JARVIS's voice was heard (the PC's): nothing to report
-    } catch (e) { lastError = (e && e.message) || String(e); }
-  }
-  if (stopped) { return; }
-  // the phone's own voice says what JARVIS's voice could not
-  for (const p of left ? chunks(left, 380) : []) {
+  lastError = '';
+  onStart();
+  for (const part of chunks(text, 380)) {
     if (stopped) { break; }
-    begin();
-    await phoneVoice(p);
+    await phoneVoice(part);
   }
+  onLevel(0);
 }

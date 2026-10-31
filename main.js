@@ -1,4 +1,4 @@
-// JARVIS Mobile: works on its own (Claude + Gemini + Google Calendar); the home PC is optional (files).
+// JARVIS Mobile: ChatGPT on the paired PC, local voice, Google Calendar and TV.
 import * as store from './store.js';
 import * as brain from './brain.js';
 import * as voice from './voice.js';
@@ -41,24 +41,7 @@ async function run(text) {
   try {
     const briefing = /^(брифинг|доброе утро|что у меня сегодня)\b/i.test(text);
     let answer;
-    const viaPC = async () => {
-      $('state').textContent = 'спрашиваю ПК';
-      const r = await pc.say(text);
-      return r.speech || 'Компьютер не ответил.';
-    };
-    if (store.off('claude') && pc.knownAlive()) {
-      answer = await viaPC();  // Claude was unreachable from this phone a moment ago: straight to the PC
-    } else {
-      try {
-        answer = await brain.ask(briefing ? 'Сделай утренний брифинг: погода сегодня, мои встречи сегодня и завтра утром. ' + text : text);
-      } catch (e) {
-        // The phone's network may not reach api.anthropic.com ("Connection error"); the paired PC can: ask it.
-        if (!pc.knownAlive() || !/connection|load failed|network|fetch/i.test(e.message || '')) { throw e; }
-        store.setOff('claude', 30 * 60000);
-        pc.report('answer via PC (phone Claude: ' + e.message + ')');
-        answer = await viaPC();
-      }
-    }
+    answer = await brain.ask(briefing ? 'Краткий брифинг на сегодня: ' + text : text);
     show(answer);
     for (const x of brain.takeExtras()) { if (x.kind === 'file') { fileButton(x.link); } }
     setState('speaking');
@@ -213,12 +196,12 @@ document.querySelectorAll('.tab').forEach((b) => {
   };
 });
 
-const FORM = { claudekey: 'claudeKey', geminikey: 'geminiKey', model: 'model', gclient: 'googleClientId', pcurl: 'pcUrl', city: 'city' };
+const FORM = { gclient: 'googleClientId', pcurl: 'pcUrl', city: 'city' };
 function fillSettings() {
   for (const [id, key] of Object.entries(FORM)) { $(id).value = store.get(key); }
   $('speak').checked = store.get('speak') === '1';
   $('gstate').textContent = !google.configured() ? 'Не настроено.' : google.signedIn() ? 'Вход выполнен.' : 'Нужно войти.';
-  $('pcmsg').textContent = pc.configured() ? 'Компьютер подключён.' : 'Не подключён (нужен только для файлов).';
+  $('pcmsg').textContent = pc.configured() ? 'Компьютер подключён.' : 'Не подключён (нужен для файлов и видео на ТВ).';
 }
 function settings(open) { if (open) { fillSettings(); } $('settings').hidden = !open; }
 $('gear').onclick = () => settings(true);
@@ -309,8 +292,12 @@ debugConsole(store.get('debug') === '1');
 async function status() {
   const up = await pc.reachable(true);
   $('pcstate').textContent = !pc.configured() ? 'не подключён' : up ? 'на связи' : 'нет связи';
-  $('dot').classList.toggle('off', !store.get('claudeKey'));
-  $('conn').textContent = store.get('claudeKey') ? 'в сети' : 'нет ключа';
+  let gpt;
+  try { gpt = up ? await pc.chatStatus() : { connected: false, error: 'Нет связи с ПК.' }; }
+  catch (e) { gpt = { connected: false, error: e.message }; }
+  $('dot').classList.toggle('off', !gpt.connected);
+  $('conn').textContent = gpt.connected ? 'ChatGPT' : 'нет связи';
+  $('chatgptstate').textContent = gpt.connected ? 'ChatGPT подключён через ПК. Модель: ' + gpt.model : gpt.error;
 }
 function clock() {
   const d = new Date();
@@ -325,5 +312,5 @@ if (google.lastError) { show('Вход в Google не выполнен: ' + goog
 else if (location.hash === '' && google.signedIn() && sessionStorage.getItem('jarvis.gshown') !== '1') {
   try { sessionStorage.setItem('jarvis.gshown', '1'); } catch (e) { /* ignore */ }
   show('Вход в Google выполнен, сэр. Календарь подключён.');
-} else if (!store.get('claudeKey')) { show('Добро пожаловать, сэр. Откройте настройки (шестерёнка) и введите ключ Claude.'); }
+} else { show(pc.configured() ? 'На связи JARVIS. Чат работает через ChatGPT на ПК.' : 'Добро пожаловать. Подключите телефон к ПК в настройках. Ключ ChatGPT не нужен.'); }
 if ('serviceWorker' in navigator) { navigator.serviceWorker.register('sw.js').catch(() => {}); }

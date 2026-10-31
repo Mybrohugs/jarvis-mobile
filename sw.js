@@ -1,9 +1,9 @@
 'use strict';
-// Caches only this app's own files, so it opens offline. Requests to Claude, Gemini, Google and the PC
+// Caches only this app's own files, so it opens offline. Requests to Google and the PC
 // are never cached.
-const CACHE = 'jarvis-mobile-v15';
+const CACHE = 'jarvis-mobile-chatgpt-dev-v23';
 const SHELL = ['./', 'index.html', 'app.css', 'mobile.css', 'orb.js', 'main.js', 'brain.js', 'voice.js', 'google.js', 'pc.js',
-  'store.js', 'manifest.webmanifest', 'icon-180.png', 'icon-512.png', 'fonts/exo2-cyrillic.woff2', 'fonts/exo2-latin.woff2'];
+  'store.js', 'tv.js', 'tv_ui.js', 'manifest.webmanifest', 'icon-180.png', 'icon-512.png', 'fonts/exo2-cyrillic.woff2', 'fonts/exo2-latin.woff2'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
@@ -14,7 +14,8 @@ self.addEventListener('activate', (e) => {
 });
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
-  if (e.request.method !== 'GET' || url.origin !== self.location.origin) { return; }
+  if (e.request.method !== 'GET' || url.origin !== self.location.origin || url.pathname.includes('/api/')) { return; }
+  if (!SHELL.some(name => new URL(name, self.registration.scope).pathname === url.pathname)) { return; }
   e.respondWith(fetch(e.request).then((r) => {  // network first, so updates arrive at once
     const copy = r.clone();
     caches.open(CACHE).then((c) => c.put(e.request, copy));

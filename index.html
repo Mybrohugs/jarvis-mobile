@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net; style-src 'self'; img-src 'self' blob: data:; media-src 'self' blob:; connect-src 'self' https://api.anthropic.com https://generativelanguage.googleapis.com https://www.googleapis.com https://api.open-meteo.com https://geocoding-api.open-meteo.com https://*.ts.net https://cdn.jsdelivr.net; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.jsdelivr.net; style-src 'self'; img-src 'self' blob: data:; media-src 'self' blob:; connect-src 'self' https://www.googleapis.com https://api.open-meteo.com https://geocoding-api.open-meteo.com https://*.ts.net https://cdn.jsdelivr.net; base-uri 'none'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
@@ -52,6 +52,24 @@
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h15M13 6l6 6-6 6"/></svg>
       </button>
     </form>
+    <details id="tvpanel">
+      <summary>Видео на телевизоре</summary>
+      <p id="tvdev" class="muted small" hidden>DEV — ChatGPT и видео через компьютер</p>
+      <div id="tvpair" hidden>
+        <label for="tvcode">Код подключения с компьютера</label>
+        <div class="askbar">
+          <input id="tvcode" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="6 цифр">
+          <button id="tvpairbutton" type="button">Подключить</button>
+        </div>
+        <p id="tvpairstate" class="muted small" role="status"></p>
+      </div>
+      <p class="muted small">Вставьте ссылку на найденное видео. Нужны включённый ПК и подключение к нему в настройках.</p>
+      <form id="tvform" class="askbar">
+        <input id="tvurl" type="url" maxlength="500" required placeholder="https://…" aria-label="Ссылка на видео" enterkeyhint="send">
+        <button id="tvsend" type="submit">На ТВ</button>
+      </form>
+      <p id="tvmsg" class="muted small" role="status" aria-live="polite">Ссылка отправляется по кнопке «На ТВ». Поддержка сайта зависит от исполнителя на ПК.</p>
+    </details>
   </section>
 
   <section id="calendar" class="pane" hidden>
@@ -78,16 +96,10 @@
       <button id="close" class="icon" type="button" aria-label="Закрыть"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div>
     <button id="briefing" type="button" class="wide">Брифинг</button>
 
-    <h2 class="hud">Мозг — Claude</h2>
-    <input id="claudekey" type="password" autocomplete="off" placeholder="ключ Claude (sk-ant-…)">
-    <select id="model">
-      <option value="claude-sonnet-5-5">Sonnet 5.5 — быстрый и умный</option>
-      <option value="claude-haiku-5-5">Haiku 5.5 — самый быстрый и дешёвый</option>
-      <option value="claude-opus-5-5">Opus 5.5 — самый умный, медленнее</option>
-    </select>
-
-    <h2 class="hud">Голос — Gemini</h2>
-    <input id="geminikey" type="password" autocomplete="off" placeholder="ключ Gemini (AIza…)">
+    <h2 class="hud">ChatGPT</h2>
+    <p id="chatgptstate" class="muted small">Подключение через ваш ПК. Ключ API на телефоне не нужен.</p>
+    <h2 class="hud">Голос</h2>
+    <p class="muted small">Распознавание на ПК, озвучивание голосом телефона. Без дополнительных ключей.</p>
     <label class="check"><input id="speak" type="checkbox" checked> Озвучивать ответы</label>
     <button id="soundtest" type="button" class="wide">Проверить звук</button>
 
@@ -120,7 +132,7 @@
 
     <h2 class="hud">Отладка</h2>
     <label class="check"><input id="debug" type="checkbox"> Консоль отладки (Eruda)</label>
-    <p class="muted small">Кнопка консоли в углу экрана: ошибки, запросы к ПК и Claude. В ней видны ключи этого телефона — не показывайте экран посторонним.</p>
+    <p class="muted small">Кнопка консоли в углу экрана: ошибки, запросы к ПК и ChatGPT. В ней видны ключи этого телефона — не показывайте экран посторонним.</p>
 
     <button id="save" type="button" class="wide">Сохранить</button>
     <button id="forget" type="button" class="wide danger">Стереть ключи и настройки с телефона</button>
@@ -128,5 +140,6 @@
 </aside>
 <script src="orb.js"></script>
 <script type="module" src="main.js"></script>
+<script type="module" src="tv_ui.js"></script>
 </body>
 </html>

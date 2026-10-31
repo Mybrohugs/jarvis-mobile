@@ -3,7 +3,7 @@
 import * as store from './store.js';
 
 const base = () => store.get('pcUrl').replace(/\/+$/, '');
-export const configured = () => /^https:\/\/[a-z0-9.-]+$/i.test(base()) && !!store.get('pcToken');
+export const configured = () => /^https:\/\/[a-z0-9.-]+(?::8443)?(?:\/jarvis-dev)?$/i.test(base()) && !!store.get('pcToken');
 
 async function call(path, opts = {}, timeoutMs = 20000) {
   const ctl = new AbortController();
@@ -36,7 +36,7 @@ export function knownAlive() {
 
 export async function pair(url, code) {
   const clean = url.trim().replace(/\/+$/, '');
-  if (!/^https:\/\/[a-z0-9.-]+$/i.test(clean)) { throw new Error('адрес вида https://имя-пк.сеть.ts.net'); }
+  if (!/^https:\/\/[a-z0-9.-]+(?::8443)?(?:\/jarvis-dev)?$/i.test(clean)) { throw new Error('адрес вида https://имя-пк.сеть.ts.net'); }
   if (!/^\d{6}$/.test(code.trim())) { throw new Error('нужен 6-значный код с компьютера'); }
   const r = await fetch(clean + '/api/pair', {
     method: 'POST', cache: 'no-store', headers: { 'Content-Type': 'application/json' },
@@ -44,8 +44,14 @@ export async function pair(url, code) {
   });
   const data = await r.json();
   if (!r.ok) { throw new Error(data.error || 'HTTP ' + r.status); }
+  if (typeof data.token !== 'string' || data.token.length < 32 || data.token.length > 256) {
+    throw new Error('Компьютер не вернул ключ подключения.');
+  }
   store.set('pcUrl', clean);
   store.set('pcToken', data.token);
+  if (store.get('pcUrl') !== clean || store.get('pcToken') !== data.token) {
+    throw new Error('Браузер не сохранил подключение. Откройте эту страницу в обычном Safari и разрешите хранение данных сайта.');
+  }
   checkedAt = 0;
   return true;
 }
@@ -61,6 +67,16 @@ async function jsonPost(path, body, timeoutMs) {
 export const say = (text) => jsonPost('/api/say', { text }, 70000);  // the PC itself waits up to 60 s for an answer
 export const find = (query) => say('найди на компьютере ' + query);
 export const send = (index) => say('отправь файл ' + index);
+
+// Read only: waiting for a queued command must never repeat its POST.
+export async function queueItem(id) {
+  if (!/^[a-f0-9]{12}$/.test(id)) { throw new Error('Некорректный номер запроса ПК.'); }
+  const response = await call('/api/queue', {}, 4000);
+  if (!response.ok) { throw new Error('Не удалось прочитать очередь ПК.'); }
+  const data = await response.json();
+  if (!Array.isArray(data.items)) { throw new Error('ПК вернул некорректную очередь.'); }
+  return data.items.find(item => item.id === id) || null;
+}
 
 export async function download(link) {
   if (!/^\/api\/file\/[A-Za-z0-9_-]{20,40}$/.test(link)) { throw new Error('bad link'); }
@@ -113,3 +129,13 @@ export async function listen(blob) {
   if (!r.ok) { throw new Error(data.error || 'HTTP ' + r.status); }
   return data.text || '';
 }
+
+// Provider authentication stays on the PC; only the paired-device token travels here.
+export async function chatStatus() {
+  if (!configured()) { return { connected: false, error: 'Подключите телефон к ПК.' }; }
+  const r = await call('/api/chatgpt/status', {}, 20000);
+  const data = await r.json();
+  if (!r.ok) { throw new Error(data.error || 'ChatGPT недоступен'); }
+  return data;
+}
+export const chatTurn = (input, context) => jsonPost('/api/chatgpt/turn', { input, context }, 150000);

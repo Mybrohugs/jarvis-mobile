@@ -294,9 +294,9 @@ async function status() {
   $('pcstate').textContent = !pc.configured() ? 'не подключён' : up ? 'на связи' : 'нет связи';
   let gpt;
   try { gpt = up ? await pc.chatStatus() : { connected: false, error: 'Нет связи с ПК.' }; }
-  catch (e) { gpt = { connected: false, error: e.message }; }
+  catch (e) { gpt = { connected: false, error: e.message, code: e.code }; }
   $('dot').classList.toggle('off', !gpt.connected);
-  $('conn').textContent = gpt.connected ? 'ChatGPT' : 'нет связи';
+  $('conn').textContent = pc.chatLabel(gpt);
   $('chatgptstate').textContent = gpt.connected ? 'ChatGPT подключён через ПК. Модель: ' + gpt.model : gpt.error;
 }
 function clock() {

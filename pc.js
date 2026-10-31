@@ -56,10 +56,27 @@ export async function pair(url, code) {
   return true;
 }
 
+function apiError(data, status) {
+  const error = new Error(data.error || 'HTTP ' + status);
+  error.code = typeof data.code === 'string' ? data.code : '';
+  error.needsAuth = data.needs_auth === true;
+  error.retryable = data.retryable === true;
+  if (Number.isFinite(data.retry_after)) { error.retryAfter = data.retry_after; }
+  return error;
+}
+
+export function chatLabel(status) {
+  if (status.connected) { return 'ChatGPT'; }
+  return ({ auth_required: 'нужен вход', network: 'нет интернета', rate_limited: 'лимит ChatGPT',
+    access_denied: 'нет доступа', configuration: 'настройка ПК', service_unavailable: 'сбой сервиса',
+    session_unavailable: 'проверка входа', storage: 'сеанс на ПК', busy: 'занят',
+    invalid_response: 'сбой ответа', incomplete_response: 'ответ прерван', unknown: 'сбой ChatGPT' })[status.code] || 'нет связи';
+}
+
 async function jsonPost(path, body, timeoutMs) {
   const r = await call(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }, timeoutMs);
   const data = await r.json();
-  if (!r.ok) { throw new Error(data.error || 'HTTP ' + r.status); }
+  if (!r.ok) { throw apiError(data, r.status); }
   return data;
 }
 
@@ -135,7 +152,7 @@ export async function chatStatus() {
   if (!configured()) { return { connected: false, error: 'Подключите телефон к ПК.' }; }
   const r = await call('/api/chatgpt/status', {}, 20000);
   const data = await r.json();
-  if (!r.ok) { throw new Error(data.error || 'ChatGPT недоступен'); }
+  if (!r.ok) { throw apiError(data, r.status); }
   return data;
 }
 export const chatTurn = (input, context) => jsonPost('/api/chatgpt/turn', { input, context }, 150000);
